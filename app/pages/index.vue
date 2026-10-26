@@ -1,4 +1,8 @@
 <script setup lang="ts">
+definePageMeta({
+  layout: false,
+})
+
 setResponseStatus(404)
 </script>
 
