@@ -444,6 +444,101 @@ describe('/', () => {
   })
 })
 
+describe('app launch and in-app browser escape', () => {
+  const UA = {
+    iosSafari: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+    iosInstagram: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 330.0.0.36.88 (iPhone15,2; iOS 17_4; en_US; en; scale=3.00; 1179x2556; 598402498)',
+    iosTikTok: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 musical_ly_34.1.0 JsSdk/2.0 NetType/WIFI Channel/App Store ByteLocale/en Region/US',
+    androidChrome: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+    androidFacebook: 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UQ1A.240205.004; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/122.0.6261.119 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/454.0.0.44.109;]',
+  }
+
+  async function createLink(prefix: string, body: Record<string, unknown>): Promise<string> {
+    const slug = `${prefix}-${crypto.randomUUID()}`
+    const response = await postJson('/api/link/create', { slug, ...body })
+    expect(response.status).toBe(201)
+    createdSlugs.push(slug)
+    return slug
+  }
+
+  function visit(slug: string, userAgent: string, path = '') {
+    return fetch(`/${slug}${path}`, { redirect: 'manual', headers: { 'User-Agent': userAgent } })
+  }
+
+  it('keeps plain redirects for regular mobile browsers', async () => {
+    const url = 'https://example.com/regular'
+    const slug = await createLink('inapp-regular', { url })
+
+    for (const ua of [UA.iosSafari, UA.androidChrome]) {
+      const response = await visit(slug, ua)
+      expect(response.status).toBe(301)
+      expect(response.headers.get('Location')).toBe(url)
+    }
+  })
+
+  it('escapes the Instagram webview on iOS', async () => {
+    const url = 'https://example.com/instagram?x=1'
+    const slug = await createLink('inapp-instagram', { url })
+
+    const response = await visit(slug, UA.iosInstagram)
+    const html = await response.text()
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(html).toContain(`instagram://extbrowser/?url=${encodeURIComponent(url)}`)
+    expect(html).toContain('Continue here')
+  })
+
+  it('escapes Android webviews through a Chrome intent', async () => {
+    const url = 'https://example.com/facebook'
+    const slug = await createLink('inapp-facebook', { url, redirectWithQuery: true })
+
+    const html = await (await visit(slug, UA.androidFacebook, '?utm_source=fb')).text()
+    expect(html).toContain('intent://example.com/facebook?utm_source=fb#Intent;scheme=https;')
+    expect(html).toContain('package=com.android.chrome')
+  })
+
+  it('shows manual instructions inside TikTok', async () => {
+    const slug = await createLink('inapp-tiktok', { url: 'https://example.com/tiktok' })
+
+    const html = await (await visit(slug, UA.iosTikTok)).text()
+    expect(html).toContain('Tap the ··· button above')
+    expect(html).toContain('"instructions":true')
+  })
+
+  it('does not escape cloaked links', async () => {
+    const slug = await createLink('inapp-cloaking', { url: 'https://example.com/cloaked', cloaking: true })
+
+    const html = await (await visit(slug, UA.iosInstagram)).text()
+    expect(html).toContain('<iframe src="https://example.com/cloaked"')
+    expect(html).not.toContain('extbrowser')
+  })
+
+  it('opens native app links with a web fallback', async () => {
+    const url = 'https://example.com/app-fallback'
+    const slug = await createLink('app-launch', {
+      url,
+      apple: 'whatsapp://channel/abc',
+      google: 'intent://channel/abc#Intent;package=com.whatsapp;scheme=whatsapp;end',
+    })
+
+    const iosHtml = await (await visit(slug, UA.iosSafari)).text()
+    expect(iosHtml).toContain('href="whatsapp://channel/abc"')
+    expect(iosHtml).toContain(`"web":"${url}"`)
+    expect(iosHtml).toContain('Open in app')
+
+    const androidHtml = await (await visit(slug, UA.androidChrome)).text()
+    expect(androidHtml).toContain(`S.browser_fallback_url=${encodeURIComponent(url)};end`)
+  })
+
+  it('never renders script-capable device URLs into the launch page', async () => {
+    const slug = await createLink('app-launch-js', { url: 'https://example.com/safe', apple: 'javascript:alert(1)' })
+
+    const response = await visit(slug, UA.iosSafari)
+    expect(response.status).toBe(301)
+    expect(response.headers.get('Location')).toBe('javascript:alert(1)')
+  })
+})
+
 describe('password protected redirect', { concurrent: false }, () => {
   it('shows password page without password, rejects wrong password, and redirects with correct password', async () => {
     const password = 'redirect-secret123'

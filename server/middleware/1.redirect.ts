@@ -189,11 +189,34 @@ export default eventHandler(async (event) => {
         }
       }
 
+      const platform = detectMobilePlatform(userAgent)
+      const inAppBrowser = platform ? detectInAppBrowser(userAgent, platform) : null
+      const showInstructions = needsOpenInBrowserInstructions(inAppBrowser)
+      const browserEscapeUrl = platform && inAppBrowser && isWebUrl(targetUrl)
+        ? buildBrowserEscapeUrl(targetUrl, platform, inAppBrowser)
+        : null
+      const sendAppLaunchHtml = (appUrl: string | null) => sendNoStoreHtml(generateAppLaunchHtml({
+        webUrl: targetUrl,
+        appUrl,
+        browserEscapeUrl,
+        showInstructions,
+        isAndroid: platform === 'android',
+        isInAppBrowser: !!inAppBrowser,
+        locale: getLocale(),
+      }))
+
       if (deviceRedirectUrl) {
+        // Native app links get a launch page that falls back to the web target when the app is missing.
+        if (platform && isAppLaunchUrl(deviceRedirectUrl) && isWebUrl(targetUrl))
+          return sendAppLaunchHtml(buildAppLaunchUrl(deviceRedirectUrl, targetUrl, userAgent, platform))
         if (redirectNoStore)
           setHeader(event, 'Cache-Control', 'no-store')
         return sendRedirect(event, finalTargetUrl, +redirectStatusCode)
       }
+
+      // Proxied and cloaked links must keep the short link in the address bar, so they stay in the webview.
+      if ((browserEscapeUrl || showInstructions) && !isProxyLink && !link.cloaking && isWebUrl(targetUrl))
+        return sendAppLaunchHtml(null)
       // Link previews use the configured OG metadata even for proxied links.
       if (isSocialBot(userAgent) && hasOgConfig(link)) {
         const baseUrl = `${getRequestProtocol(event)}://${getRequestHost(event)}`

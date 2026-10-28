@@ -45,6 +45,32 @@ Visitors must confirm unsafe links without a password via `POST` with `confirm=t
 - **By country:** map country codes (for example `US`, `JP`) to different URLs
 - **By device:** Apple iOS mobile devices (iPhone, iPad, iPod) and Android targets win over default or country targets (macOS is not included)
 
+### App deep links
+
+The Apple and Android targets can also be native app links, such as `whatsapp://channel/abc` or `intent://channel/abc#Intent;package=com.whatsapp;scheme=whatsapp;end`. For those, Sink serves a short launch page instead of a redirect:
+
+- It tries to open the app, then falls back to the default or country URL if the app does not open.
+- Android intents automatically get `S.browser_fallback_url`, so Chrome opens the web URL itself when the app is missing.
+- Visitors also get **Open in app** and **Open in browser** buttons.
+- Browser workarounds: Opera GX gets custom schemes converted to intents, and Brave gets YouTube intents rewritten to `vnd.youtube`.
+
+`https://` store links (App Store, Google Play) keep the plain redirect. `javascript:`, `data:`, and similar schemes are never rendered into the launch page.
+
+### Escaping in-app browsers
+
+When a mobile visitor opens a link inside a social app's built-in browser, Sink tries to move them to their real browser. This applies to every link automatically:
+
+| In-app browser                                                                   | Behavior                                                |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Instagram (iOS)                                                                  | Opens `instagram://extbrowser/`                         |
+| Threads (iOS)                                                                    | Opens `barcelona://extbrowser/`                         |
+| Facebook, Messenger, Snapchat, LinkedIn, Pinterest, LINE, and other iOS webviews | Opens Safari via `x-safari-https://` (iOS 17+)          |
+| Android webviews (Facebook, Instagram, LinkedIn, and others)                     | Opens Chrome via an intent, with a web fallback         |
+| TikTok, WeChat                                                                   | Shows "Tap ··· and choose Open in browser" instructions |
+| X on Android                                                                     | Plain redirect (X blocks external-browser intents)      |
+
+The page always offers a **Continue here** button in case the escape is blocked. Regular mobile browsers, desktop visitors, cloaked links, and reverse-proxied links keep their normal behavior.
+
 ## Social previews (OpenGraph), bots, and cloaking
 
 Custom title, description, and image control how the link looks when shared on social apps. With R2 configured you can upload images (JPEG/PNG/WebP/GIF, max 5 MB).

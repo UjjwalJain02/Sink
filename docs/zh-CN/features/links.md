@@ -45,6 +45,32 @@ DNS 检查失败时，Sink 会放行链接，而不是拦截。
 - **按国家/地区：** 把国家代码（如 `US`、`JP`）映射到不同 URL
 - **按设备：** Apple iOS 移动设备（iPhone、iPad、iPod，不含 macOS）与 Android 目标优先于默认或国家目标
 
+### 应用深度链接
+
+Apple 与 Android 目标也可以填写原生应用链接，例如 `whatsapp://channel/abc` 或 `intent://channel/abc#Intent;package=com.whatsapp;scheme=whatsapp;end`。此时 Sink 不直接重定向，而是返回一个启动页：
+
+- 先尝试打开应用，若应用未打开，则回退到默认或国家目标 URL
+- Android intent 会自动附加 `S.browser_fallback_url`，未安装应用时由 Chrome 直接打开网页
+- 页面同时提供 **在应用中打开** 与 **在浏览器中打开** 按钮
+- 浏览器兼容：Opera GX 会把自定义 scheme 转为 intent，Brave 会把 YouTube intent 改写为 `vnd.youtube`
+
+`https://` 应用商店链接（App Store、Google Play）仍然直接重定向。`javascript:`、`data:` 等 scheme 永远不会渲染到启动页中。
+
+### 跳出应用内浏览器
+
+移动端访客在社交应用的内置浏览器中打开链接时，Sink 会尝试把他们转到系统浏览器。该行为对所有链接自动生效：
+
+| 应用内浏览器                                                                | 行为                                            |
+| --------------------------------------------------------------------------- | ----------------------------------------------- |
+| Instagram（iOS）                                                            | 打开 `instagram://extbrowser/`                  |
+| Threads（iOS）                                                              | 打开 `barcelona://extbrowser/`                  |
+| Facebook、Messenger、Snapchat、LinkedIn、Pinterest、LINE 及其他 iOS WebView | 通过 `x-safari-https://` 打开 Safari（iOS 17+） |
+| Android WebView（Facebook、Instagram、LinkedIn 等）                         | 通过 intent 打开 Chrome，并带网页回退           |
+| TikTok、微信                                                                | 显示“点击 ··· 并选择在浏览器中打开”的提示       |
+| Android 版 X                                                                | 直接重定向（X 会拦截外部浏览器 intent）         |
+
+页面始终提供 **在此继续** 按钮，以防跳转被拦截。普通移动浏览器、桌面访客、隐匿链接和反向代理链接保持原有行为。
+
 ## 社交预览（OpenGraph）、机器人与隐匿
 
 自定义标题、描述和图片，控制链接在社交应用里分享时的样子。配置 R2 后可上传图片（JPEG/PNG/WebP/GIF，最大 5 MB）。

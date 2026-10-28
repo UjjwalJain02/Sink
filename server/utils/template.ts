@@ -150,6 +150,102 @@ export function generateUnsafeWarningHtml(slug: string, targetUrl: string, optio
 </html>`
 }
 
+interface AppLaunchHtmlOptions {
+  webUrl: string
+  appUrl?: string | null
+  browserEscapeUrl?: string | null
+  showInstructions?: boolean
+  isAndroid?: boolean
+  isInAppBrowser?: boolean
+  locale?: RedirectLocale
+}
+
+function toInlineScriptJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+}
+
+// Runs in the visitor's browser: try the app, then the system browser, then the web URL.
+const APP_LAUNCH_SCRIPT = `(function(){
+var c=JSON.parse(document.getElementById('sink-launch').textContent);
+var timers=[];
+function cancel(){timers.forEach(clearTimeout);timers=[]}
+document.addEventListener('visibilitychange',function(){if(document.hidden)cancel()});
+window.addEventListener('pagehide',cancel);
+window.addEventListener('blur',cancel);
+function open(u){var a=document.createElement('a');a.href=u;a.rel='noreferrer';document.body.appendChild(a);a.click();a.remove()}
+function later(f,ms){timers.push(setTimeout(f,ms))}
+var app=c.app;
+if(app&&navigator.brave&&/package=com\\.google\\.android\\.youtube;/i.test(app)){
+var m=app.match(/(?:[?&]v=|\\/shorts\\/|youtu\\.be\\/)([\\w-]{11})/);
+app=m?'intent:'+m[1]+'#Intent;scheme=vnd.youtube;end':null;
+var b=document.getElementById('open-app');
+if(b){if(app)b.href=app;else b.remove()}
+}
+if(c.instructions)return;
+if(app){
+open(app);
+later(function(){if(c.escape)open(c.escape);else if(!c.inApp)location.replace(c.web)},c.android?2500:1500);
+}else if(c.escape){open(c.escape)}
+})()`
+
+export function generateAppLaunchHtml(options: AppLaunchHtmlOptions): string {
+  const { webUrl, appUrl = null, browserEscapeUrl = null, showInstructions = false, isAndroid = false, isInAppBrowser = false, locale = 'en-US' } = options
+  const t = REDIRECT_TRANSLATIONS[locale]
+  const title = showInstructions || !appUrl ? t.inAppTitle : t.appOpening
+  const config = toInlineScriptJson({ web: webUrl, app: appUrl, escape: browserEscapeUrl, instructions: showInstructions, android: isAndroid, inApp: isInAppBrowser })
+  const primaryLink = appUrl
+    ? `<a id="open-app" class="btn btn-primary" href="${escape(appUrl)}">${escape(t.appOpenInApp)}</a>`
+    : browserEscapeUrl
+      ? `<a class="btn btn-primary" href="${escape(browserEscapeUrl)}">${escape(t.appOpenInBrowser)}</a>`
+      : ''
+  const secondaryHref = appUrl && browserEscapeUrl ? browserEscapeUrl : webUrl
+  const secondaryLabel = isInAppBrowser && secondaryHref === webUrl ? t.appContinueHere : t.appOpenInBrowser
+
+  return `<!DOCTYPE html>
+<html lang="${escape(locale)}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>${escape(title)}</title>
+    <noscript><meta http-equiv="refresh" content="0;url=${escape(webUrl)}"></noscript>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#09090b;color:#fafafa}
+      .card{background:#0a0a0a;border:1px solid #27272a;border-radius:8px;padding:2rem;width:100%;max-width:360px;margin:1rem;text-align:center}
+      h1{font-size:1.125rem;font-weight:600;letter-spacing:-.025em;margin-bottom:.5rem}
+      .desc{font-size:.875rem;color:#a1a1aa;line-height:1.5;margin-bottom:1.5rem}
+      .actions{display:flex;flex-direction:column;gap:.75rem}
+      .btn{display:block;padding:.625rem;border-radius:6px;font-size:.875rem;font-weight:500;text-decoration:none;transition:background-color .15s ease}
+      .btn-primary{background:#fafafa;color:#18181b}
+      .btn-primary:hover{background:#e4e4e7}
+      .btn-secondary{border:1px solid #27272a;background:#18181b;color:#fafafa}
+      .btn-secondary:hover{background:#27272a}
+      .hint{position:fixed;top:.75rem;right:1.25rem;display:flex;flex-direction:column;align-items:flex-end}
+      .hint svg{width:1.75rem;height:2.5rem;color:#fafafa;animation:bounce 1s ease-in-out infinite}
+      @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+    </style>
+</head>
+<body>${showInstructions
+  ? `
+    <div class="hint" aria-hidden="true"><svg viewBox="0 0 28 40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 36V4m0 0L4 14m10-10 10 10"/></svg></div>`
+  : ''}
+    <div class="card">
+        <h1>${escape(title)}</h1>
+        <p class="desc">${escape(showInstructions ? `${t.inAppTapMenu} ${t.inAppChooseBrowser}` : appUrl ? t.appOpeningDesc : t.inAppDesc)}</p>
+        <div class="actions">${showInstructions ? '' : primaryLink ? `\n            ${primaryLink}` : ''}
+            <a class="btn btn-secondary" href="${escape(showInstructions ? webUrl : secondaryHref)}">${escape(showInstructions ? t.appContinueHere : secondaryLabel)}</a>
+        </div>
+    </div>
+    <script type="application/json" id="sink-launch">${config}</script>
+    <script>${APP_LAUNCH_SCRIPT}</script>
+</body>
+</html>`
+}
+
 export function generateOgHtml(link: Link, targetUrl: string, baseUrl: string): string {
   const { title, tags } = buildMetaTags(link, baseUrl)
 
